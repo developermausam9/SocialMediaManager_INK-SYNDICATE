@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-telegram-bot>=20.0
+google-generativeai
+supabase
+requests
+pydantic
+pydantic-settings
+python-dotenv
