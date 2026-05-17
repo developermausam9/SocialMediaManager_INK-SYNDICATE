@@ -7,3 +7,4 @@ requests
 pydantic
 pydantic-settings
 python-dotenv
+huggingface_hub
