@@ -12,6 +12,11 @@ class SimpleHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot is alive and polling!")
         
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        
     def log_message(self, format, *args):
         # Suppress GET request logs to avoid spamming the console
         pass
