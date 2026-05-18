@@ -10,7 +10,7 @@ class ImageGenerator:
     def __init__(self):
         self.api_key = settings.HF_API_KEY
         if self.api_key and self.api_key != 'your_huggingface_key':
-            self.client = InferenceClient("black-forest-labs/FLUX.1-schnell", token=self.api_key)
+            self.client = InferenceClient("black-forest-labs/FLUX.1-schnell", token=self.api_key, timeout=120)
         else:
             self.client = None
 
