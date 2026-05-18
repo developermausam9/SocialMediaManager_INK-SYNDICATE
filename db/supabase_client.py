@@ -126,7 +126,7 @@ class SupabaseDB:
             self.supabase.storage.from_("ig_images").upload(
                 file_name,
                 file_bytes,
-                file_options={"content-type": "image/png"}
+                file_options={"content-type": "image/jpeg" if file_name.lower().endswith(('.jpg', '.jpeg')) else "image/png"}
             )
             public_url = self.supabase.storage.from_("ig_images").get_public_url(file_name)
             return public_url

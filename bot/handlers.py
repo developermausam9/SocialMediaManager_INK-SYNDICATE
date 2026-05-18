@@ -101,7 +101,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             image_urls = []
             uploaded_files = []
             for i, img_bytes in enumerate(images_bytes):
-                file_name = f"{post_id}_{i}.png"
+                file_name = f"{post_id}_{i}.jpg"
                 url = db_client.upload_image(file_name, img_bytes)
                 image_urls.append(url)
                 uploaded_files.append(file_name)

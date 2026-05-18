@@ -30,7 +30,9 @@ class ImageGenerator:
             )
             
             img_byte_arr = BytesIO()
-            image.save(img_byte_arr, format='PNG')
+            if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
+                image = image.convert('RGB')
+            image.save(img_byte_arr, format='JPEG', quality=95)
             return img_byte_arr.getvalue()
         except Exception as e:
             logger.error(f"Failed to generate image: {e}")
