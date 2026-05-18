@@ -54,7 +54,13 @@ async def _do_generate(message_obj, update: Update):
         
         keyboard = [
             [
-                InlineKeyboardButton("✅ Approve & Post to FB + IG", callback_data=f"approve_{post_id}"),
+                InlineKeyboardButton("🚀 Post to Both (FB + IG)", callback_data=f"approve_both_{post_id}")
+            ],
+            [
+                InlineKeyboardButton("🔵 Post to FB Only", callback_data=f"approve_fb_{post_id}"),
+                InlineKeyboardButton("🟣 Post to IG Only", callback_data=f"approve_ig_{post_id}")
+            ],
+            [
                 InlineKeyboardButton("🔄 Regenerate", callback_data="regenerate")
             ]
         ]
@@ -86,8 +92,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data
     if data.startswith("approve_"):
-        post_id = data.split("_")[1]
-        await query.edit_message_text("⏳ Uploading images & posting to socials...")
+        parts = data.split("_")
+        if len(parts) == 3:
+            target = parts[1] # "both", "fb", or "ig"
+            post_id = parts[2]
+        else:
+            target = "both"
+            post_id = parts[1]
+            
+        target_str = "socials"
+        if target == "fb":
+            target_str = "Facebook"
+        elif target == "ig":
+            target_str = "Instagram"
+            
+        await query.edit_message_text(f"⏳ Uploading images & posting to {target_str}...")
         
         post = db_client.get_pending_post(post_id)
         if not post:
@@ -97,52 +116,123 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         images_bytes = generated_images_cache.get(post_id, [])
         
         try:
-            # 1. Upload to Supabase to get public URLs for Instagram
+            # 1. Upload to Supabase to get public URLs for Instagram (only if IG or Both, and not uploaded already)
             image_urls = []
             uploaded_files = []
-            for i, img_bytes in enumerate(images_bytes):
-                file_name = f"{post_id}_{i}.jpg"
-                url = db_client.upload_image(file_name, img_bytes)
-                image_urls.append(url)
-                uploaded_files.append(file_name)
+            if target in ("both", "ig") and images_bytes:
+                for i, img_bytes in enumerate(images_bytes):
+                    file_name = f"{post_id}_{i}.jpg"
+                    url = db_client.upload_image(file_name, img_bytes)
+                    image_urls.append(url)
+                    uploaded_files.append(file_name)
                 
-            # 2. Post to Facebook (using bytes directly)
+            # 2. Post to Facebook (using bytes directly, only if FB or Both)
             fb_post_id = None
-            try:
-                fb_post_id = social_poster.post_to_facebook(post['caption'], images_bytes)
-            except Exception as e:
-                logger.error(f"FB Post Failed: {e}")
-                
-            # 3. Post to Instagram (using public URLs)
+            if target in ("both", "fb"):
+                try:
+                    fb_post_id = social_poster.post_to_facebook(post['caption'], images_bytes)
+                except Exception as e:
+                    logger.error(f"FB Post Failed: {e}")
+                    
+            # 3. Post to Instagram (using public URLs, only if IG or Both)
             ig_post_id = None
-            try:
-                ig_post_id = social_poster.post_to_instagram(post['caption'], image_urls)
-            except Exception as e:
-                logger.error(f"IG Post Failed: {e}")
-                
-            if not fb_post_id and not ig_post_id:
+            if target in ("both", "ig"):
+                try:
+                    ig_post_id = social_poster.post_to_instagram(post['caption'], image_urls)
+                except Exception as e:
+                    logger.error(f"IG Post Failed: {e}")
+                    
+            # Determine success status
+            fb_success = (target in ("both", "fb") and fb_post_id is not None)
+            ig_success = (target in ("both", "ig") and ig_post_id is not None)
+            
+            # We raise an error only if everything selected failed completely
+            if target == "fb" and not fb_success:
+                raise Exception("Facebook posting failed.")
+            elif target == "ig" and not ig_success:
+                raise Exception("Instagram posting failed.")
+            elif target == "both" and not fb_success and not ig_success:
                 raise Exception("Both Facebook and Instagram posting failed.")
                 
-            # Update DB with FB ID and the newly generated image URLs
-            db_client.update_post_status(post_id, 'posted', fb_post_id)
-            # Optionally update the row to save the image URLs
-            if image_urls:
-                db_client.supabase.table('posts').update({'image_urls': image_urls}).eq('id', post_id).execute()
-                
-            # Clean up Supabase Storage since the images have been pushed to IG
-            if uploaded_files:
-                db_client.delete_images(uploaded_files)
-                
-            generated_images_cache.pop(post_id, None)
+            # Update DB with FB ID if Facebook was successful
+            if fb_success:
+                db_client.update_post_status(post_id, 'posted', fb_post_id)
             
-            success_msg = "✅ Successfully posted!\n"
-            if fb_post_id: success_msg += f"- Facebook ID: {fb_post_id}\n"
-            if ig_post_id: success_msg += f"- Instagram ID: {ig_post_id}"
+            # Save the image URLs in the DB if Instagram was successful
+            if ig_success and image_urls:
+                try:
+                    db_client.supabase.table('posts').update({'image_urls': image_urls}).eq('id', post_id).execute()
+                except Exception as e:
+                    logger.error(f"Failed to update image URLs in DB: {e}")
+                    
+            # Clean up Supabase Storage only if Instagram posting was successful OR if we only posted to Facebook successfully
+            if ig_success or (target == "fb" and fb_success):
+                if uploaded_files:
+                    try:
+                        db_client.delete_images(uploaded_files)
+                    except Exception as e:
+                        logger.error(f"Cleanup of images failed: {e}")
+            
+            # Clean cache only if the requested targets succeeded completely
+            target_succeeded = False
+            if target == "fb" and fb_success:
+                target_succeeded = True
+            elif target == "ig" and ig_success:
+                target_succeeded = True
+            elif target == "both" and fb_success and ig_success:
+                target_succeeded = True
                 
-            await query.edit_message_text(success_msg)
+            if target_succeeded:
+                generated_images_cache.pop(post_id, None)
+                
+            # Construct feedback message
+            success_msg = ""
+            if fb_success and ig_success:
+                success_msg = f"✅ Successfully posted to both!\n- Facebook ID: {fb_post_id}\n- Instagram ID: {ig_post_id}"
+            elif fb_success and target == "fb":
+                success_msg = f"✅ Successfully posted to Facebook!\n- Facebook ID: {fb_post_id}"
+            elif ig_success and target == "ig":
+                success_msg = f"✅ Successfully posted to Instagram!\n- Instagram ID: {ig_post_id}"
+            elif target == "both" and fb_success and not ig_success:
+                success_msg = f"⚠️ Posted to Facebook, but **failed on Instagram**!\n- Facebook ID: {fb_post_id}\n\n👉 You can fix the issue and click **🟣 Retry IG Only** below to retry!"
+            elif target == "both" and not fb_success and ig_success:
+                success_msg = f"⚠️ Posted to Instagram, but **failed on Facebook**!\n- Instagram ID: {ig_post_id}\n\n👉 You can fix the issue and click **🔵 Retry FB Only** below to retry!"
+            else:
+                success_msg = "❌ Posting failed."
+                
+            # Show retry keyboard if there were partial failures
+            if not target_succeeded:
+                keyboard = []
+                fb_button_needed = (target in ("both", "fb") and not fb_success)
+                ig_button_needed = (target in ("both", "ig") and not ig_success)
+                
+                row = []
+                if fb_button_needed:
+                    row.append(InlineKeyboardButton("🔵 Retry FB Only", callback_data=f"approve_fb_{post_id}"))
+                if ig_button_needed:
+                    row.append(InlineKeyboardButton("🟣 Retry IG Only", callback_data=f"approve_ig_{post_id}"))
+                    
+                if row:
+                    keyboard.append(row)
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(success_msg, reply_markup=reply_markup)
+            else:
+                await query.edit_message_text(success_msg)
         except Exception as e:
             logger.error(f"Approval post failed: {e}")
-            await query.edit_message_text("❌ Failed to post to socials. See logs.")
+            # If everything failed, allow retrying either
+            keyboard = []
+            row = []
+            if target in ("both", "fb"):
+                row.append(InlineKeyboardButton("🔵 Retry FB Only", callback_data=f"approve_fb_{post_id}"))
+            if target in ("both", "ig"):
+                row.append(InlineKeyboardButton("🟣 Retry IG Only", callback_data=f"approve_ig_{post_id}"))
+            
+            if row:
+                keyboard.append(row)
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(f"❌ Failed to post to socials: {e}\n\nChoose an option to retry below:", reply_markup=reply_markup)
             
     elif data == "regenerate":
         await query.edit_message_text("🔄 Triggering regeneration...")
