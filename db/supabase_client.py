@@ -89,12 +89,6 @@ class SupabaseDB:
             self.log('INFO', 'Duplication detected: same category twice in a row')
             return True
 
-        # Check last 3 posts for visual style / category
-        last_3_categories = [p['category'] for p in posts[:3]]
-        if last_3_categories.count(new_category) > 0:
-            self.log('INFO', 'Duplication detected: category in last 3 posts')
-            return True
-
         # Check for similar captions (>80%)
         for p in posts:
             similarity = SequenceMatcher(None, p['caption'], new_caption).ratio()

@@ -18,7 +18,7 @@ class ContentEngine:
         Runs the full pipeline to generate a post.
         Returns a dict with post_id, category, caption, prompts, and image_bytes.
         """
-        max_attempts = 3
+        max_attempts = 10
         for attempt in range(max_attempts):
             try:
                 # 1. Select Category
